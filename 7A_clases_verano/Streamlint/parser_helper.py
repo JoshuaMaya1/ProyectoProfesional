@@ -1,18 +1,4 @@
-"""
-parser_helper.py
-------------------
-Criterio 3: helper del analizador sintactico para Streamlint.
-Se encarga UNICAMENTE de correr ANTLR (lexer + parser) sobre un
-archivo ya validado y regresar el arbol sintactico.
-
-La validacion del archivo (extension, existencia, contenido) vive
-en validator_helper.py -- este modulo no valida nada, solo parsea.
-
-Requiere que ExprLexer.py y ExprParser.py ya esten generados con:
-    antlr4 -Dlanguage=Python3 -visitor Expr.g4
-"""
-
-from antlr4 import FileStream, CommonTokenStream
+from antlr4 import FileStream, CommonTokenStream, Token
 from antlr4.error.ErrorListener import ErrorListener
 
 from ExprLexer import ExprLexer
@@ -20,30 +6,44 @@ from ExprParser import ExprParser
 
 
 class StreamlintErrorListener(ErrorListener):
-    """Junta los errores lexicos y sintacticos que ANTLR va reportando,
-    en vez de solo imprimirlos en consola, para poder mostrarlos
-    despues de forma ordenada desde app.py."""
 
     def __init__(self):
         super().__init__()
         self.errors = []
 
     def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
-        self.errors.append(f"[Linea {line}:{column}] {msg}")
+        self.errors.append(f"[Línea {line}:{column}] {msg}")
+
+
+def nombre_token(lexer, tipo):
+    """Devuelve un nombre legible para el tipo de token sin tronar
+    si el índice no existe en symbolicNames/literalNames. No usa
+    getVocabulary() porque no todas las versiones del runtime de
+    antlr4 lo traen; symbolicNames y literalNames sí siempre existen
+    como atributos de la clase generada."""
+
+    simbolicos = lexer.symbolicNames
+    literales = lexer.literalNames
+
+    nombre = None
+
+    if 0 <= tipo < len(simbolicos):
+        nombre = simbolicos[tipo]
+
+    if (not nombre or nombre == "<INVALID>") and 0 <= tipo < len(literales):
+        nombre = literales[tipo]
+
+    if not nombre or nombre == "<INVALID>":
+        nombre = f"TIPO_{tipo}"
+
+    return nombre
 
 
 class StreamlintParserHelper:
 
     @staticmethod
-    def parse(file_path: str):
-        """
-        Ejecuta el analisis lexico y sintactico de un archivo .cs
-        usando el lexer/parser generados por ANTLR a partir de Expr.g4.
+    def parse(file_path):
 
-        Regresa una tupla (arbol, errores):
-          - arbol: nodo raiz (ProgramContext) o None si hubo errores
-          - errores: lista de strings con los errores encontrados
-        """
         input_stream = FileStream(file_path, encoding="utf-8")
 
         error_listener = StreamlintErrorListener()
@@ -54,13 +54,34 @@ class StreamlintParserHelper:
 
         token_stream = CommonTokenStream(lexer)
 
+        # ---------- obtener TODOS los tokens ----------
+        token_stream.fill()
+
+        lista_tokens = []
+
+        for token in token_stream.tokens:
+
+            if token.type == Token.EOF:
+                continue
+
+            lista_tokens.append({
+                "Token": nombre_token(lexer, token.type),
+                "Lexema": token.text,
+                "Línea": token.line,
+                "Columna": token.column
+            })
+
+        # volver a usar el mismo stream para el parser
+        token_stream.seek(0)
+
         parser = ExprParser(token_stream)
+
         parser.removeErrorListeners()
         parser.addErrorListener(error_listener)
 
         tree = parser.program()
 
         if error_listener.errors:
-            return None, error_listener.errors
+            return None, error_listener.errors, lista_tokens, None
 
-        return tree, []
+        return tree, [], lista_tokens, tree.toStringTree(recog=parser)

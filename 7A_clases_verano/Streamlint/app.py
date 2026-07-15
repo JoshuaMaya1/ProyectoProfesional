@@ -20,6 +20,7 @@ from parser_helper import StreamlintParserHelper
 from semantic_analyzer import StreamlintSemanticAnalyzer
 
 
+
 def main(archivo: str) -> None:
     print("=== Streamlint ===")
     print(f"Analizando: {archivo}\n")
